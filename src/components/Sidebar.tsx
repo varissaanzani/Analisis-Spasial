@@ -784,10 +784,16 @@ export const Sidebar: React.FC = () => {
           borderRadius: '10px', border: '1px solid var(--border-color)',
         }}>
           <button
+            type="button"
+            title="Direktori"
+            aria-pressed={activeTab === 'directory' || activeTab === 'detail'}
             className={`tab-btn ${activeTab === 'directory' || activeTab === 'detail' ? 'active' : ''}`}
             onClick={() => { setSelectedPool(null); setActiveTab('directory'); }}
           >Direktori</button>
           <button
+            type="button"
+            title="Cari Terdekat"
+            aria-pressed={activeTab === 'nearest'}
             className={`tab-btn ${activeTab === 'nearest' ? 'active' : ''}`}
             onClick={() => setActiveTab('nearest')}
           >
