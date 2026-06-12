@@ -90,13 +90,31 @@ const MapController: React.FC = () => {
 
 // Map click event observer for finding nearest pool or picking coordinates
 const MapEventsHandler: React.FC = () => {
-  const { activeTab, findNearestPool, isSelectingLocation, setIsSelectingLocation, setFormCoords } = useSpatial();
+  const { 
+    activeTab, 
+    findNearestPool, 
+    isSelectingLocation, 
+    setIsSelectingLocation, 
+    setFormCoords,
+    isSelectingUserLocation,
+    setIsSelectingUserLocation,
+    selectedPool,
+    setUserLocation,
+    calculateRouteToPool
+  } = useSpatial();
 
   useMapEvents({
     click(e) {
       if (isSelectingLocation) {
         setFormCoords([e.latlng.lat, e.latlng.lng]);
         setIsSelectingLocation(false);
+      } else if (isSelectingUserLocation) {
+        if (selectedPool) {
+          calculateRouteToPool(selectedPool, [e.latlng.lat, e.latlng.lng]);
+        } else {
+          setUserLocation([e.latlng.lat, e.latlng.lng]);
+        }
+        setIsSelectingUserLocation(false);
       } else if (activeTab === 'nearest') {
         findNearestPool(e.latlng.lat, e.latlng.lng);
       }
@@ -115,7 +133,8 @@ export const Map: React.FC = () => {
     nearestRouteGeoJson,
     activeTab,
     isSelectingLocation,
-    formCoords
+    formCoords,
+    isSelectingUserLocation
   } = useSpatial();
 
   // Custom pool popup layout
@@ -309,6 +328,36 @@ export const Map: React.FC = () => {
         >
           <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#ffffff', animation: 'ping 1s infinite' }}></div>
           Klik pada peta untuk menentukan koordinat kolam!
+        </div>
+      )}
+
+      {/* Floating coordinates picker info box for user location */}
+      {isSelectingUserLocation && (
+        <div
+          className="animate-fade-in"
+          style={{
+            position: 'absolute',
+            top: '24px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            backgroundColor: 'rgba(8, 145, 178, 0.95)',
+            color: 'white',
+            backdropFilter: 'blur(8px)',
+            padding: '12px 24px',
+            borderRadius: '30px',
+            fontSize: '0.825rem',
+            fontWeight: 600,
+            zIndex: 1000,
+            pointerEvents: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            boxShadow: 'var(--shadow-lg)',
+            border: '1px solid rgba(255,255,255,0.2)',
+          }}
+        >
+          <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#ffffff', animation: 'ping 1s infinite' }}></div>
+          Klik pada peta untuk menetapkan lokasi Anda saat ini!
         </div>
       )}
     </div>

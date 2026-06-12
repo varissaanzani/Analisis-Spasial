@@ -53,6 +53,21 @@ interface SpatialContextType {
   setIsSelectingLocation: (val: boolean) => void;
   formCoords: [number, number] | null;
   setFormCoords: (coords: [number, number] | null) => void;
+
+  // New user routing additions
+  isSelectingUserLocation: boolean;
+  setIsSelectingUserLocation: (val: boolean) => void;
+  calculateRouteToPool: (pool: SwimmingPool, customCoords?: [number, number]) => void;
+  routeDetails: RouteDetails | null;
+  routeMode: 'driving' | 'walking';
+  setRouteMode: (mode: 'driving' | 'walking') => void;
+}
+
+export interface RouteDetails {
+  drivingDistance: number;
+  drivingDuration: number;
+  walkingDistance: number;
+  walkingDuration: number;
 }
 
 const SpatialContext = createContext<SpatialContextType | undefined>(undefined);
@@ -824,6 +839,26 @@ export const SpatialProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Interactive location picker states
   const [isSelectingLocation, setIsSelectingLocation] = useState<boolean>(false);
   const [formCoords, setFormCoords] = useState<[number, number] | null>(null);
+  const [isSelectingUserLocation, setIsSelectingUserLocation] = useState<boolean>(false);
+
+  // Dual routing states
+  const [routeDetails, setRouteDetails] = useState<RouteDetails | null>(null);
+  const [routeMode, setRouteModeState] = useState<'driving' | 'walking'>('driving');
+  const [drivingGeometry, setDrivingGeometry] = useState<any | null>(null);
+  const [walkingGeometry, setWalkingGeometry] = useState<any | null>(null);
+
+  const setRouteMode = (mode: 'driving' | 'walking') => {
+    setRouteModeState(mode);
+    if (routeDetails) {
+      if (mode === 'driving') {
+        setNearestDistance(routeDetails.drivingDistance);
+        if (drivingGeometry) setNearestRouteGeoJson(drivingGeometry);
+      } else {
+        setNearestDistance(routeDetails.walkingDistance);
+        if (walkingGeometry) setNearestRouteGeoJson(walkingGeometry);
+      }
+    }
+  };
 
   // Fetch pools from backend on mount
   useEffect(() => {
@@ -872,12 +907,179 @@ export const SpatialProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setFilteredPools(result);
   }, [pools, searchQuery, selectedKategori, selectedJenis]);
 
-  const handleSelectPool = (pool: SwimmingPool | null) => {
+  const handleSelectPool = async (pool: SwimmingPool | null) => {
     setSelectedPool(pool);
     if (pool) {
       setMapCenter([pool.latitude, pool.longitude]);
       setMapZoom(15);
       setActiveTab('detail');
+      
+      // Auto-calculate route if userLocation is already set
+      if (userLocation) {
+        const [userLat, userLng] = userLocation;
+        try {
+          // Fetch driving route from German OSM routing (routed-car)
+          const drivingUrl = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${userLng},${userLat};${pool.longitude},${pool.latitude}?overview=full&geometries=geojson`;
+          const drivingRes = await fetch(drivingUrl);
+          if (!drivingRes.ok) throw new Error('Driving fetch error');
+          const drivingData = await drivingRes.json();
+          
+          // Fetch walking route from German OSM routing (routed-foot)
+          const walkingUrl = `https://routing.openstreetmap.de/routed-foot/route/v1/driving/${userLng},${userLat};${pool.longitude},${pool.latitude}?overview=full&geometries=geojson`;
+          const walkingRes = await fetch(walkingUrl);
+          if (!walkingRes.ok) throw new Error('Walking fetch error');
+          const walkingData = await walkingRes.json();
+          
+          if (drivingData.routes && drivingData.routes.length > 0 && walkingData.routes && walkingData.routes.length > 0) {
+            const drivingRoute = drivingData.routes[0];
+            const walkingRoute = walkingData.routes[0];
+            
+            const details: RouteDetails = {
+              drivingDistance: parseFloat((drivingRoute.distance / 1000).toFixed(2)),
+              drivingDuration: Math.round(drivingRoute.duration / 60),
+              walkingDistance: parseFloat((walkingRoute.distance / 1000).toFixed(2)),
+              walkingDuration: Math.round(walkingRoute.duration / 60)
+            };
+            
+            setRouteDetails(details);
+            setDrivingGeometry(drivingRoute.geometry);
+            setWalkingGeometry(walkingRoute.geometry);
+            
+            if (routeMode === 'driving') {
+              setNearestDistance(details.drivingDistance);
+              setNearestRouteGeoJson(drivingRoute.geometry);
+            } else {
+              setNearestDistance(details.walkingDistance);
+              setNearestRouteGeoJson(walkingRoute.geometry);
+            }
+            return;
+          }
+          throw new Error('No routes found');
+        } catch (err) {
+          console.warn('OSRM routing failed on selectPool, using straight line fallback:', err);
+          const dist = turf.distance(
+            turf.point([userLng, userLat]),
+            turf.point([pool.longitude, pool.latitude]),
+            { units: 'kilometers' }
+          );
+          const fallbackDist = parseFloat(dist.toFixed(2));
+          const details: RouteDetails = {
+            drivingDistance: fallbackDist,
+            drivingDuration: Math.round((fallbackDist / 40) * 60),
+            walkingDistance: fallbackDist,
+            walkingDuration: Math.round((fallbackDist / 5) * 60)
+          };
+          setRouteDetails(details);
+          const lineGeom = turf.lineString([[userLng, userLat], [pool.longitude, pool.latitude]]).geometry;
+          setDrivingGeometry(lineGeom);
+          setWalkingGeometry(lineGeom);
+          
+          setNearestDistance(fallbackDist);
+          setNearestRouteGeoJson(lineGeom);
+        }
+      }
+    } else {
+      clearNearestAnalysis();
+    }
+  };
+
+  const calculateRouteToPool = (pool: SwimmingPool, customCoords?: [number, number]) => {
+    const performRouting = async (lat: number, lng: number) => {
+      setUserLocation([lat, lng]);
+      
+      try {
+        // Fetch driving route from German OSM routing (routed-car)
+        const drivingUrl = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${lng},${lat};${pool.longitude},${pool.latitude}?overview=full&geometries=geojson`;
+        const drivingRes = await fetch(drivingUrl);
+        if (!drivingRes.ok) throw new Error('Driving fetch error');
+        const drivingData = await drivingRes.json();
+        
+        // Fetch walking route from German OSM routing (routed-foot)
+        const walkingUrl = `https://routing.openstreetmap.de/routed-foot/route/v1/driving/${lng},${lat};${pool.longitude},${pool.latitude}?overview=full&geometries=geojson`;
+        const walkingRes = await fetch(walkingUrl);
+        if (!walkingRes.ok) throw new Error('Walking fetch error');
+        const walkingData = await walkingRes.json();
+        
+        if (drivingData.routes && drivingData.routes.length > 0 && walkingData.routes && walkingData.routes.length > 0) {
+          const drivingRoute = drivingData.routes[0];
+          const walkingRoute = walkingData.routes[0];
+          
+          const details: RouteDetails = {
+            drivingDistance: parseFloat((drivingRoute.distance / 1000).toFixed(2)),
+            drivingDuration: Math.round(drivingRoute.duration / 60),
+            walkingDistance: parseFloat((walkingRoute.distance / 1000).toFixed(2)),
+            walkingDuration: Math.round(walkingRoute.duration / 60)
+          };
+          
+          setRouteDetails(details);
+          setDrivingGeometry(drivingRoute.geometry);
+          setWalkingGeometry(walkingRoute.geometry);
+          
+          if (routeMode === 'driving') {
+            setNearestDistance(details.drivingDistance);
+            setNearestRouteGeoJson(drivingRoute.geometry);
+          } else {
+            setNearestDistance(details.walkingDistance);
+            setNearestRouteGeoJson(walkingRoute.geometry);
+          }
+          
+          // Fit map bounds to show both points
+          const avgLat = (lat + pool.latitude) / 2;
+          const avgLng = (lng + pool.longitude) / 2;
+          setMapCenter([avgLat, avgLng]);
+          setMapZoom(13);
+          return;
+        }
+        throw new Error('No OSRM routes found');
+      } catch (err) {
+        console.warn('OSRM routing failed, using straight line fallback:', err);
+        const dist = turf.distance(
+          turf.point([lng, lat]),
+          turf.point([pool.longitude, pool.latitude]),
+          { units: 'kilometers' }
+        );
+        const fallbackDist = parseFloat(dist.toFixed(2));
+        
+        const details: RouteDetails = {
+          drivingDistance: fallbackDist,
+          drivingDuration: Math.round((fallbackDist / 40) * 60),
+          walkingDistance: fallbackDist,
+          walkingDuration: Math.round((fallbackDist / 5) * 60)
+        };
+        
+        setRouteDetails(details);
+        const lineGeom = turf.lineString([[lng, lat], [pool.longitude, pool.latitude]]).geometry;
+        setDrivingGeometry(lineGeom);
+        setWalkingGeometry(lineGeom);
+        
+        setNearestDistance(fallbackDist);
+        setNearestRouteGeoJson(lineGeom);
+        
+        // Zoom map to cover both points
+        const avgLat = (lat + pool.latitude) / 2;
+        const avgLng = (lng + pool.longitude) / 2;
+        setMapCenter([avgLat, avgLng]);
+        setMapZoom(13);
+      }
+    };
+
+    if (customCoords) {
+      performRouting(customCoords[0], customCoords[1]);
+      return;
+    }
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          performRouting(position.coords.latitude, position.coords.longitude);
+        },
+        (error) => {
+          console.error('Geolocation error:', error);
+          alert('Gagal mendapatkan lokasi GPS. Silakan klik tombol "Pilih di Peta" untuk menentukan lokasi Anda secara manual.');
+        }
+      );
+    } else {
+      alert('Browser Anda tidak mendukung Geolocation.');
     }
   };
 
@@ -963,8 +1165,31 @@ export const SpatialProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (closestPool) {
       setNearestPool(closestPool);
-      setNearestDistance(parseFloat(minDistance.toFixed(2)));
-      setNearestRouteGeoJson(turf.lineString([[lng, lat], [(closestPool as SwimmingPool).longitude, (closestPool as SwimmingPool).latitude]]));
+      
+      const getRoadRoute = async (targetPool: SwimmingPool) => {
+        try {
+          const url = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${lng},${lat};${targetPool.longitude},${targetPool.latitude}?overview=full&geometries=geojson`;
+          const response = await fetch(url);
+          if (!response.ok) throw new Error('OSRM API error');
+          const data = await response.json();
+          if (data.routes && data.routes.length > 0) {
+            const route = data.routes[0];
+            setNearestDistance(parseFloat((route.distance / 1000).toFixed(2)));
+            setNearestRouteGeoJson(route.geometry);
+            return;
+          }
+          throw new Error('No OSRM routes found');
+        } catch (err) {
+          console.warn('OSRM routing failed on findNearestPool, using straight line fallback:', err);
+          setNearestDistance(parseFloat(minDistance.toFixed(2)));
+          setNearestRouteGeoJson(
+            turf.lineString([[lng, lat], [targetPool.longitude, targetPool.latitude]])
+          );
+        }
+      };
+
+      getRoadRoute(closestPool);
+      
       setActiveTab('nearest');
       const avgLat = (lat + (closestPool as SwimmingPool).latitude) / 2;
       const avgLng = (lng + (closestPool as SwimmingPool).longitude) / 2;
@@ -976,6 +1201,9 @@ export const SpatialProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const clearNearestAnalysis = () => {
     setUserLocation(null); setNearestPool(null); setNearestDistance(null);
     setNearestRouteGeoJson(null); setActiveTab('directory');
+    setRouteDetails(null);
+    setDrivingGeometry(null);
+    setWalkingGeometry(null);
   };
 
   return (
@@ -989,7 +1217,12 @@ export const SpatialProvider: React.FC<{ children: React.ReactNode }> = ({ child
       mapCenter, setMapCenter, mapZoom, setMapZoom, activeTab, setActiveTab,
       addPool, updatePool, deletePool,
       isSelectingLocation, setIsSelectingLocation,
-      formCoords, setFormCoords
+      formCoords, setFormCoords,
+      isSelectingUserLocation, setIsSelectingUserLocation,
+      calculateRouteToPool,
+      routeDetails,
+      routeMode,
+      setRouteMode
     }}>
       {children}
     </SpatialContext.Provider>

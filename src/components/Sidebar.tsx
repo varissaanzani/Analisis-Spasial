@@ -3,7 +3,8 @@ import { useSpatial } from '../context/SpatialContext';
 import {
   Search, MapPin, Clock, Coins, Star,
   ArrowLeft, Check, Compass, Navigation,
-  Dumbbell, Home, Plus, Trash2, Edit, X
+  Dumbbell, Home, Plus, Trash2, Edit, X,
+  Car, Footprints
 } from 'lucide-react';
 
 const IMAGE_PRESETS = [
@@ -55,7 +56,13 @@ export const Sidebar: React.FC = () => {
     isSelectingLocation,
     setIsSelectingLocation,
     formCoords,
-    setFormCoords
+    setFormCoords,
+    isSelectingUserLocation,
+    setIsSelectingUserLocation,
+    calculateRouteToPool,
+    routeDetails,
+    routeMode,
+    setRouteMode
   } = useSpatial();
 
   const [localSearch, setLocalSearch] = useState(searchQuery);
@@ -1066,6 +1073,137 @@ export const Sidebar: React.FC = () => {
                 <MapPin size={13} color="var(--text-muted)" />
                 {selectedPool.address}
               </p>
+            </div>
+
+            {/* Rute & Jarak Card */}
+            <div style={{ 
+              padding: '14px', 
+              background: userLocation ? 'var(--bg-accent-light)' : 'var(--bg-secondary)', 
+              border: userLocation ? '1px solid rgba(8, 145, 178, 0.3)' : '1px solid var(--border-color)', 
+              borderRadius: 'var(--radius-md)', 
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px'
+            }}>
+              {userLocation && routeDetails ? (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.73rem', fontWeight: 700, color: 'var(--accent-primary)', textTransform: 'uppercase' }}>
+                      📍 Rute ke Lokasi Aktif
+                    </span>
+                    <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                      Pilih rute untuk peta
+                    </span>
+                  </div>
+
+                  {/* Dual Route Options (Google Maps style) */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', margin: '4px 0' }}>
+                    {/* Driving / Kendaraan */}
+                    <div 
+                      onClick={() => setRouteMode('driving')}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '10px 12px', borderRadius: '8px', cursor: 'pointer',
+                        border: routeMode === 'driving' ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                        background: routeMode === 'driving' ? 'rgba(8,145,178,0.08)' : 'var(--bg-primary)',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Car size={16} color={routeMode === 'driving' ? 'var(--accent-primary)' : 'var(--text-muted)'} />
+                        <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-primary)' }}>Berkendara</span>
+                      </div>
+                      <div style={{ fontSize: '0.78rem' }}>
+                        <strong style={{ color: 'var(--text-primary)' }}>{routeDetails.drivingDistance} km</strong>
+                        <span style={{ color: 'var(--text-muted)', marginLeft: '6px' }}>
+                          ({routeDetails.drivingDuration >= 60 
+                            ? `${Math.floor(routeDetails.drivingDuration / 60)} jam ${routeDetails.drivingDuration % 60} mnt` 
+                            : `${routeDetails.drivingDuration} mnt`})
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Walking / Jalan Kaki */}
+                    <div 
+                      onClick={() => setRouteMode('walking')}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '10px 12px', borderRadius: '8px', cursor: 'pointer',
+                        border: routeMode === 'walking' ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                        background: routeMode === 'walking' ? 'rgba(8,145,178,0.08)' : 'var(--bg-primary)',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Footprints size={16} color={routeMode === 'walking' ? 'var(--accent-primary)' : 'var(--text-muted)'} />
+                        <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-primary)' }}>Jalan Kaki</span>
+                      </div>
+                      <div style={{ fontSize: '0.78rem' }}>
+                        <strong style={{ color: 'var(--text-primary)' }}>{routeDetails.walkingDistance} km</strong>
+                        <span style={{ color: 'var(--text-muted)', marginLeft: '6px' }}>
+                          ({routeDetails.walkingDuration >= 60 
+                            ? `${Math.floor(routeDetails.walkingDuration / 60)} jam ${routeDetails.walkingDuration % 60} mnt` 
+                            : `${routeDetails.walkingDuration} mnt`})
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '2px 0 0 0', lineHeight: 1.35 }}>
+                    * Rute dan estimasi waktu berkendara/berjalan kaki diambil langsung dari peta jalan OSRM.
+                  </p>
+
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                    <button 
+                      type="button" 
+                      className="btn btn-secondary" 
+                      style={{ flex: 1, fontSize: '0.75rem', padding: '6px' }}
+                      onClick={() => calculateRouteToPool(selectedPool)}
+                    >
+                      Perbarui GPS
+                    </button>
+                    <button 
+                      type="button" 
+                      className="btn btn-danger" 
+                      style={{ flex: 1, fontSize: '0.75rem', padding: '6px' }}
+                      onClick={clearNearestAnalysis}
+                    >
+                      Hapus Rute
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span style={{ fontSize: '0.73rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                    🚗 Rute & Jarak Spasial
+                  </span>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.4 }}>
+                    Hitung rute jalan raya dan jarak ke kolam renang ini via Kendaraan atau Jalan Kaki.
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button 
+                      type="button" 
+                      className="btn btn-primary" 
+                      style={{ flex: 1, fontSize: '0.75rem', padding: '8px', gap: '4px', justifyContent: 'center', display: 'flex', alignItems: 'center' }}
+                      onClick={() => calculateRouteToPool(selectedPool)}
+                    >
+                      <Navigation size={12} /> Gunakan GPS
+                    </button>
+                    <button 
+                      type="button" 
+                      className="btn btn-secondary" 
+                      style={{ flex: 1, fontSize: '0.75rem', padding: '8px', gap: '4px', justifyContent: 'center', display: 'flex', alignItems: 'center' }}
+                      onClick={() => {
+                        setIsSelectingUserLocation(!isSelectingUserLocation);
+                        setIsSelectingLocation(false);
+                      }}
+                    >
+                      <MapPin size={12} />
+                      {isSelectingUserLocation ? 'Klik Peta...' : 'Pilih di Peta'}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Description */}
